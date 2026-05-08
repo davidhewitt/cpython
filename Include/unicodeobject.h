@@ -114,6 +114,18 @@ PyAPI_DATA(PyTypeObject) PyUnicodeIter_Type;
 
 /* === Public API ========================================================= */
 
+// Goals:
+//   1. create only utf8 array in the structure
+//      a. flag in the structure to indicate whether the utf8 array is valid
+//      b. we allow the utf8 array to contain CPython's 'surrogatepass' encoding
+//      c. new constructors:
+//         - PyUnicode_FromStringAndSize will copy the passed buffer and validate it as surrogatepass encoding
+//
+//   surrogatepass encoding is a special UTF-8 encoding that encodes bytes in the range 0x80-0xFF as
+//   Unicode code points in the range U+DC80-U+DCFF.
+//
+//   2. codepoint array will be NULL until first char-based API called (e.g. indexing)
+
 /* Similar to PyUnicode_FromUnicode(), but u points to UTF-8 encoded bytes */
 PyAPI_FUNC(PyObject*) PyUnicode_FromStringAndSize(
     const char *u,             /* UTF-8 encoded string */

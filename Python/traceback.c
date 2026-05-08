@@ -915,16 +915,17 @@ _Py_DumpASCII(int fd, PyObject *text)
     if (!PyUnicode_Check(text))
         return;
 
-    size = ascii->length;
-    kind = ascii->state.kind;
+    _PyUnicode_FillDataOrAbort(text);
+    size = ascii->lazy_length;
+    kind = ascii->state.lazy_kind;
     if (ascii->state.compact) {
-        if (ascii->state.ascii)
+        if (ascii->state.lazy_ascii)
             data = ascii + 1;
         else
             data = _PyCompactUnicodeObject_CAST(text) + 1;
     }
     else {
-        data = _PyUnicodeObject_CAST(text)->data.any;
+        data = PyUnicode_DATA(text);
         if (data == NULL)
             return;
     }
@@ -938,7 +939,7 @@ _Py_DumpASCII(int fd, PyObject *text)
     }
 
     // Is an ASCII string?
-    if (ascii->state.ascii) {
+    if (ascii->state.lazy_ascii) {
         assert(kind == PyUnicode_1BYTE_KIND);
         char *str = data;
 

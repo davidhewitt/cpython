@@ -63,7 +63,8 @@ read_py_str(
         return NULL;
     }
 
-    Py_ssize_t len = GET_MEMBER(Py_ssize_t, unicode_obj, unwinder->debug_offsets.unicode_object.length);
+    abort();  // FIXME! :)
+    Py_ssize_t len = GET_MEMBER(Py_ssize_t, unicode_obj, unwinder->debug_offsets.unicode_object.lazy_length);
     if (len < 0 || len > max_len) {
         PyErr_Format(PyExc_RuntimeError,
                      "Invalid string length (%zd) at 0x%lx", len, address);
@@ -87,11 +88,11 @@ read_py_str(
         return NULL;
     }
 
-    int kind = (int)state.kind;
+    int kind = (int)state.lazy_kind;
     Py_UCS4 max_char;
     switch (kind) {
         case PyUnicode_1BYTE_KIND:
-            max_char = state.ascii ? 0x7F : 0xFF;
+            max_char = state.lazy_ascii ? 0x7F : 0xFF;
             break;
         case PyUnicode_2BYTE_KIND:
             max_char = 0xFFFF;
@@ -107,7 +108,7 @@ read_py_str(
             return NULL;
     }
 
-    size_t header_size = state.ascii
+    size_t header_size = state.lazy_ascii
         ? (size_t)unwinder->debug_offsets.unicode_object.asciiobject_size
         : (size_t)unwinder->debug_offsets.unicode_object.compactunicodeobject_size;
 

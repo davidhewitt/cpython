@@ -222,7 +222,7 @@ typedef struct _Py_DebugOffsets {
     struct _unicode_object {
         uint64_t size;
         uint64_t state;
-        uint64_t length;
+        uint64_t lazy_length;
         uint64_t asciiobject_size;
         uint64_t compactunicodeobject_size;
     } unicode_object;
@@ -385,7 +385,7 @@ typedef struct _Py_DebugOffsets {
     .unicode_object = { \
         .size = sizeof(PyUnicodeObject), \
         .state = offsetof(PyUnicodeObject, _base._base.state), \
-        .length = offsetof(PyUnicodeObject, _base._base.length), \
+        .lazy_length = offsetof(PyUnicodeObject, _base._base.lazy_length), \
         .asciiobject_size = sizeof(PyASCIIObject), \
         .compactunicodeobject_size = sizeof(PyCompactUnicodeObject), \
     }, \
