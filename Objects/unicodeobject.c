@@ -2069,6 +2069,13 @@ PyUnicode_FromSurrogateEscape(const char *u, Py_ssize_t size)
     return (PyObject *)unicode;
 }
 
+static int
+unicode_decode_utf8_impl(_PyUnicodeWriter *writer,
+                         const char *starts, const char *s, const char *end,
+                         _Py_error_handler error_handler,
+                         const char *errors,
+                         Py_ssize_t *consumed);
+
 // TODO: split this into a variant which propagates memory errors
 PyObject* _PyUnicode_FillDataOrAbort(PyObject* op)
 {
@@ -2078,27 +2085,41 @@ PyObject* _PyUnicode_FillDataOrAbort(PyObject* op)
 
     PyCompactUnicodeObject *compact = _PyCompactUnicodeObject_CAST(op);
 
-    // TODO: don't create a temporary unicode
-    PyObject *decoded = unicode_decode_utf8(
-        compact->surrogate_escaped,
-        compact->surrogate_escaped_length,
-        _Py_ERROR_SURROGATEESCAPE,
-        "surrogateescape",
-        NULL
-    );
+    _PyUnicodeWriter writer;
+    _PyUnicodeWriter_Init(&writer);
 
+    const char* starts = compact->surrogate_escaped;
+    const char* s = starts;
+    const char* end = starts + compact->surrogate_escaped_length;
+    Py_ssize_t consumed = 0;
+
+    // FIXME: this statement is crashing in `make`
+
+    if (unicode_decode_utf8_impl(&writer, starts, s, end,
+                                 _Py_ERROR_SURROGATEESCAPE, "surrogateescape",
+                                 &consumed) < 0) {
+        PyErr_WriteUnraisable(op);
+        // TODO: write a better error message
+        Py_FatalError("unicode decode failed to fill str data");
+    }
+
+    PyObject *decoded = _PyUnicodeWriter_Finish(&writer);
     if (decoded == NULL) {
         PyErr_WriteUnraisable(op);
         // TODO: write a better error message
         Py_FatalError("unicode decode failed to fill str data");
     }
 
-    PyUnicodeObject *unicode = _PyUnicodeObject_CAST(op);
+    // TODO make a macro to "take" the data from the writer?
+    _PyUnicode_SET_DATA_ANY(op, _PyUnicode_DATA_ANY(decoded));
+    _PyUnicode_LAZY_LENGTH(op) = _PyUnicode_LAZY_LENGTH(decoded);
+    _PyUnicode_STATE(op).lazy_kind = _PyUnicode_STATE(decoded).lazy_kind;
 
-    // FIXME: should copy the buffers into new allocation, and
-    // NOT leak `decoded`
-    unicode->data.lazy_any = _PyUnicode_DATA(decoded);
-    _PyUnicode_STATE(op).lazy_kind = PyUnicode_KIND(decoded);
+    _PyUnicode_SET_DATA_ANY(decoded, NULL);
+    _PyUnicode_LAZY_LENGTH(decoded) = -1;
+    _PyUnicode_STATE(decoded).lazy_kind = 0;
+
+    Py_DECREF(decoded);
 
     return op;
 }
@@ -5210,6 +5231,56 @@ find_first_nonascii(const unsigned char *start, const unsigned char *end)
 #endif
 }
 
+/*
+ * Find the first non-UT8 codepoint in a byte sequence.
+ *
+ * This function scans a range of bytes from `start` to `end` and returns the
+ * index of the first byte that is not a UTF-8 codepoint.
+ *
+ * If all characters in the range are UTF-8, it returns `end - start`.
+ */
+static Py_ssize_t
+find_first_non_utf8(const unsigned char *start, const unsigned char *end)
+{
+    const unsigned char *p = start;
+
+    while (p < end) {
+        unsigned char ch = *p;
+        if (ch < 0x80) {
+            // ASCII character
+            p++;
+        }
+        else if ((ch & 0xE0) == 0xC0) {
+            // 2-byte sequence
+            if (p + 1 >= end || (p[1] & 0xC0) != 0x80) {
+                break;
+            }
+            p += 2;
+        }
+        else if ((ch & 0xF0) == 0xE0) {
+            // 3-byte sequence
+            if (p + 2 >= end || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) {
+                break;
+            }
+            p += 3;
+        }
+        else if ((ch & 0xF8) == 0xF0) {
+            // 4-byte sequence
+            if (p + 3 >= end || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80 || (p[3] & 0xC0) != 0x80) {
+                break;
+            }
+            p += 4;
+        }
+        else {
+            // Invalid UTF-8 start byte
+            break;
+        }
+    }
+
+    return p - start;
+}
+
+
 static inline int
 scalar_utf8_start_char(unsigned int ch)
 {
@@ -5457,6 +5528,16 @@ unicode_decode_utf8(const char *s, Py_ssize_t size,
         if (consumed) {
             *consumed = size;
         }
+        return u;
+    }
+
+    Py_ssize_t utf8_pos = find_first_non_utf8((const unsigned char*)(starts + pos), (const unsigned char*)end);
+    if (utf8_pos == size) {  // fast path: UTF-8 string.
+        PyObject *u = PyUnicode_FromSurrogateEscape(starts, size);
+        if (u == NULL) {
+            return NULL;
+        }
+        _PyUnicode_STATE(u).is_valid_utf8 = 1;
         return u;
     }
 
