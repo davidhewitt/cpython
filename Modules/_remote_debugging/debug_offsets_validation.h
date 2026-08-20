@@ -304,7 +304,7 @@ validate_fixed_field(
     APPLY(bytes_object, ob_sval, sizeof(char), _Alignof(char), buffer_size)
 
 #define PY_REMOTE_DEBUG_UNICODE_OBJECT_FIELDS(APPLY, buffer_size) \
-    APPLY(unicode_object, length, sizeof(Py_ssize_t), _Alignof(Py_ssize_t), buffer_size); \
+    APPLY(unicode_object, lazy_length, sizeof(Py_ssize_t), _Alignof(Py_ssize_t), buffer_size); \
     APPLY(unicode_object, state, sizeof(struct _PyUnicodeObject_state), _Alignof(struct _PyUnicodeObject_state), buffer_size); \
     APPLY(unicode_object, asciiobject_size, sizeof(char), _Alignof(char), buffer_size); \
     APPLY(unicode_object, compactunicodeobject_size, sizeof(char), _Alignof(char), buffer_size)

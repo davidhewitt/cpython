@@ -192,13 +192,15 @@ extern PyTypeObject _PyExc_MemoryError;
 #define _PyUnicode_ASCII_BASE_INIT(LITERAL, ASCII) \
     { \
         .ob_base = _PyObject_HEAD_INIT(&PyUnicode_Type), \
-        .length = sizeof(LITERAL) - 1, \
+        .lazy_length = sizeof(LITERAL) - 1, \
         .hash = -1, \
         .state = { \
-            .kind = 1, \
+            .lazy_kind = 1, \
             .compact = 1, \
-            .ascii = (ASCII), \
+            .lazy_ascii = (ASCII), \
             .statically_allocated = 1, \
+            .is_valid_utf8 = 1, \
+            .is_invalid_utf8 = 0, \
         }, \
     }
 #define _PyASCIIObject_INIT(LITERAL) \
@@ -214,8 +216,8 @@ extern PyTypeObject _PyExc_MemoryError;
     { \
         ._latin1 = { \
             ._base = _PyUnicode_ASCII_BASE_INIT((LITERAL), 0), \
-            .utf8 = (UTF8), \
-            .utf8_length = sizeof(UTF8) - 1, \
+            .surrogate_escaped = (UTF8), \
+            .surrogate_escaped_length = sizeof(UTF8) - 1, \
         }, \
         ._data = (LITERAL), \
     }

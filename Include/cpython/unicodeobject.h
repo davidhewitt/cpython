@@ -85,7 +85,7 @@ struct _PyUnicodeObject_state {
          * all characters are in the range U+0000-U+10FFFF
          * at least one character is in the range U+10000-U+10FFFF
        */
-    unsigned int kind:3;
+    unsigned int lazy_kind:3;
     /* Compact is with respect to the allocation scheme. Compact unicode
        objects only require one memory block while non-compact objects use
        one block for the PyUnicodeObject struct and another for its data
@@ -94,13 +94,17 @@ struct _PyUnicodeObject_state {
     /* The string only contains characters in the range U+0000-U+007F (ASCII)
        and the kind is PyUnicode_1BYTE_KIND. If ascii is set and compact is
        set, use the PyASCIIObject structure. */
-    unsigned int ascii:1;
+    unsigned int lazy_ascii:1;
     /* The object is statically allocated. */
     unsigned int statically_allocated:1;
+    /* The surrogateescape buffer is known to contain valid UTF-8. */
+    unsigned int is_valid_utf8:1;
+    /* The surrogateescape buffer is known to contain invalid UTF-8. */
+    unsigned int is_invalid_utf8:1;
 #ifndef Py_GIL_DISABLED
     /* Historical: padding to ensure that PyUnicode_DATA() is always aligned to
        4 bytes (see issue gh-63736 on m68k) */
-    unsigned int :24;
+    unsigned int :22;
 #endif
 };
 
@@ -154,7 +158,7 @@ typedef struct {
        See also _PyUnicode_CheckConsistency().
     */
     PyObject_HEAD
-    Py_ssize_t length;          /* Number of code points in the string */
+    Py_ssize_t lazy_length;          /* Number of code points in the string */
     Py_hash_t hash;             /* Hash value; -1 if not set */
     /* Ensure 4 byte alignment for PyUnicode_DATA(), see gh-63736 on m68k. */
    _Py_ALIGNED_DEF(4, struct _PyUnicodeObject_state) state;
@@ -165,19 +169,19 @@ typedef struct {
    immediately follow the structure. */
 typedef struct {
     PyASCIIObject _base;
-    Py_ssize_t utf8_length;     /* Number of bytes in utf8, excluding the
+    Py_ssize_t surrogate_escaped_length;     /* Number of bytes in utf8, excluding the
                                  * terminating \0. */
-    char *utf8;                 /* UTF-8 representation (null-terminated) */
+    char *surrogate_escaped;      /* UTF-8 representation with surrogate escapes (null-terminated) */
 } PyCompactUnicodeObject;
 
 /* Object format for Unicode subclasses. */
 typedef struct {
     PyCompactUnicodeObject _base;
     union {
-        void *any;
-        Py_UCS1 *latin1;
-        Py_UCS2 *ucs2;
-        Py_UCS4 *ucs4;
+        void *lazy_any;
+        Py_UCS1 *lazy_latin1;
+        Py_UCS2 *lazy_ucs2;
+        Py_UCS4 *lazy_ucs4;
     } data;                     /* Canonical, smallest-form Unicode buffer */
 } PyUnicodeObject;
 
@@ -192,6 +196,7 @@ typedef struct {
     (assert(PyUnicode_Check(op)), \
      _Py_CAST(PyUnicodeObject*, (op)))
 
+PyAPI_FUNC(PyObject*) _PyUnicode_FillDataOrAbort(PyObject* op);
 
 /* --- Flexible String Representation Helper Macros (PEP 393) -------------- */
 
@@ -222,7 +227,8 @@ static inline unsigned int PyUnicode_IS_READY(PyObject* Py_UNUSED(op)) {
 /* Return true if the string contains only ASCII characters, or 0 if not. The
    string may be compact (PyUnicode_IS_COMPACT_ASCII) or not. */
 static inline unsigned int PyUnicode_IS_ASCII(PyObject *op) {
-    return _PyASCIIObject_CAST(op)->state.ascii;
+    _PyUnicode_FillDataOrAbort(op);
+    return _PyASCIIObject_CAST(op)->state.lazy_ascii;
 }
 #define PyUnicode_IS_ASCII(op) PyUnicode_IS_ASCII(_PyObject_CAST(op))
 
@@ -236,7 +242,7 @@ static inline unsigned int PyUnicode_IS_COMPACT(PyObject *op) {
 /* Return true if the string is a compact ASCII string (use PyASCIIObject
    structure), or 0 if not.  No type checks are performed. */
 static inline int PyUnicode_IS_COMPACT_ASCII(PyObject *op) {
-    return (_PyASCIIObject_CAST(op)->state.ascii && PyUnicode_IS_COMPACT(op));
+    return (PyUnicode_IS_COMPACT(op) && _PyASCIIObject_CAST(op)->state.lazy_ascii);
 }
 #define PyUnicode_IS_COMPACT_ASCII(op) PyUnicode_IS_COMPACT_ASCII(_PyObject_CAST(op))
 
@@ -255,7 +261,8 @@ PyAPI_FUNC(int) PyUnicode_KIND(PyObject *op);
 // new compiler warnings on "kind < PyUnicode_KIND(str)" (compare signed and
 // unsigned numbers) where kind type is an int or on
 // "unsigned int kind = PyUnicode_KIND(str)" (cast signed to unsigned).
-#define PyUnicode_KIND(op) _Py_RVALUE(_PyASCIIObject_CAST(op)->state.kind)
+#define PyUnicode_KIND(op) \
+    _Py_RVALUE(_PyASCIIObject_CAST(_PyUnicode_FillDataOrAbort(op))->state.lazy_kind)
 
 /* Return a void pointer to the raw unicode buffer. */
 static inline void* _PyUnicode_COMPACT_DATA(PyObject *op) {
@@ -268,7 +275,8 @@ static inline void* _PyUnicode_COMPACT_DATA(PyObject *op) {
 static inline void* _PyUnicode_NONCOMPACT_DATA(PyObject *op) {
     void *data;
     assert(!PyUnicode_IS_COMPACT(op));
-    data = _PyUnicodeObject_CAST(op)->data.any;
+    _PyUnicode_FillDataOrAbort(op);
+    data = _PyUnicodeObject_CAST(op)->data.lazy_any;
     assert(data != NULL);
     return data;
 }
@@ -294,7 +302,8 @@ static inline void* _PyUnicode_DATA(PyObject *op) {
 
 /* Returns the length of the unicode string. */
 static inline Py_ssize_t PyUnicode_GET_LENGTH(PyObject *op) {
-    return _PyASCIIObject_CAST(op)->length;
+    _PyUnicode_FillDataOrAbort(op);
+    return _PyASCIIObject_CAST(op)->lazy_length;
 }
 #define PyUnicode_GET_LENGTH(op) PyUnicode_GET_LENGTH(_PyObject_CAST(op))
 
